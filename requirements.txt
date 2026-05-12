@@ -1,0 +1,6 @@
+wxPython
+pyperclip
+keyboard
+pystray
+pillow
+pyttsx3

@@ -1,0 +1,7 @@
+APP_TITLE = "Accessible Clipboard Manager"
+
+WINDOW_WIDTH = 700
+WINDOW_HEIGHT = 500
+
+MAX_HISTORY = 100
+MONITOR_INTERVAL = 1

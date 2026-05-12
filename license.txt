@@ -1,0 +1,9 @@
+Accessible Clipboard Manager License Agreement
+
+Copyright (c) 2026 Dharesh
+
+This software is provided "as is", without warranty.
+
+You may use this software for personal and educational purposes.
+
+You may not redistribute modified versions without permission.
