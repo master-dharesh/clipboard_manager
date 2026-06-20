@@ -5,8 +5,10 @@ from clipboard_monitor import ClipboardMonitor
 from database import (
     create_database,
     load_history,
+    load_favorites,
     delete_item,
-    mark_favorite
+    set_favorite,
+    clear_history
 )
 
 from hotkeys import register_hotkeys
@@ -38,33 +40,58 @@ class ClipboardFrame(wx.Frame):
 
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
+        # Visible label that screen readers announce for the search box.
+        search_label = wx.StaticText(panel, label="Search clipboard history:")
+        search_label.SetForegroundColour(wx.Colour(255, 255, 255))
+
         self.search = wx.TextCtrl(panel)
         self.search.SetHint("Search clipboard history")
+        # Accessible name read aloud by screen readers (e.g. NVDA / Narrator).
+        self.search.SetName("Search clipboard history")
+
+        # Visible label for the history list.
+        list_label = wx.StaticText(panel, label="Clipboard history:")
+        list_label.SetForegroundColour(wx.Colour(255, 255, 255))
 
         self.listbox = wx.ListBox(panel)
+        self.listbox.SetName("Clipboard history list")
 
         self.copy_button = wx.Button(panel, label="Copy Selected")
         self.delete_button = wx.Button(panel, label="Delete Selected")
-        self.favorite_button = wx.Button(panel, label="Add to Favorites")
+        self.add_favorite_button = wx.Button(panel, label="Add to Favorites")
+        self.remove_favorite_button = wx.Button(panel, label="Remove from Favorites")
+        self.show_favorites_button = wx.Button(panel, label="Show Favorites")
         self.export_button = wx.Button(panel, label="Export History")
+        self.clear_button = wx.Button(panel, label="Clear History")
 
+        main_sizer.Add(search_label, 0, wx.LEFT | wx.TOP, 5)
         main_sizer.Add(self.search, 0, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(list_label, 0, wx.LEFT | wx.TOP, 5)
         main_sizer.Add(self.listbox, 1, wx.EXPAND | wx.ALL, 5)
         main_sizer.Add(self.copy_button, 0, wx.EXPAND | wx.ALL, 5)
         main_sizer.Add(self.delete_button, 0, wx.EXPAND | wx.ALL, 5)
-        main_sizer.Add(self.favorite_button, 0, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(self.add_favorite_button, 0, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(self.remove_favorite_button, 0, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(self.show_favorites_button, 0, wx.EXPAND | wx.ALL, 5)
         main_sizer.Add(self.export_button, 0, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(self.clear_button, 0, wx.EXPAND | wx.ALL, 5)
 
         panel.SetSizer(main_sizer)
 
-        self.history = []
+        # records: the currently displayed list of items (dicts).
+        self.records = []
+        # showing_favorites: which view is active.
+        self.showing_favorites = False
 
         self.load_clipboard_history()
 
         self.copy_button.Bind(wx.EVT_BUTTON, self.copy_selected)
         self.delete_button.Bind(wx.EVT_BUTTON, self.delete_selected)
-        self.favorite_button.Bind(wx.EVT_BUTTON, self.add_favorite)
+        self.add_favorite_button.Bind(wx.EVT_BUTTON, self.add_favorite)
+        self.remove_favorite_button.Bind(wx.EVT_BUTTON, self.remove_favorite)
+        self.show_favorites_button.Bind(wx.EVT_BUTTON, self.toggle_view)
         self.export_button.Bind(wx.EVT_BUTTON, self.export_data)
+        self.clear_button.Bind(wx.EVT_BUTTON, self.clear_data)
 
         self.search.Bind(wx.EVT_TEXT, self.on_search)
 
@@ -81,36 +108,71 @@ class ClipboardFrame(wx.Frame):
 
         register_hotkeys(self.show_window)
 
+    def format_label(self, record):
+
+        star = "* " if record["favorite"] else ""
+
+        return f"{star}[{record['category']}] {record['content']}"
+
+    def refresh_listbox(self):
+
+        labels = [
+            self.format_label(record)
+            for record in self.records
+        ]
+
+        self.listbox.Set(labels)
+
     def load_clipboard_history(self):
 
-        self.history = load_history()
+        if self.showing_favorites:
+            self.records = load_favorites()
+        else:
+            self.records = load_history()
 
-        self.listbox.Set(self.history)
+        self.refresh_listbox()
 
-    def add_clipboard_item(self, text):
+    def add_clipboard_item(self, text, category):
 
         wx.CallAfter(
             self.update_history,
-            text
+            text,
+            category
         )
 
-    def update_history(self, text):
+    def update_history(self, text, category):
 
-        if text not in self.history:
+        # New clipboard items only show up in the full history view.
+        if self.showing_favorites:
+            return
 
-            self.history.insert(0, text)
+        self.records = [
+            r for r in self.records if r["content"] != text
+        ]
 
-            self.listbox.Set(self.history)
+        self.records.insert(
+            0,
+            {"content": text, "category": category, "favorite": 0}
+        )
 
-    def copy_selected(self, event):
+        self.refresh_listbox()
+
+    def get_selected_record(self):
 
         selection = self.listbox.GetSelection()
 
-        if selection != wx.NOT_FOUND:
+        if selection == wx.NOT_FOUND:
+            return None
 
-            text = self.listbox.GetString(selection)
+        return self.records[selection]
 
-            pyperclip.copy(text)
+    def copy_selected(self, event):
+
+        record = self.get_selected_record()
+
+        if record:
+
+            pyperclip.copy(record["content"])
 
             speak("Copied")
 
@@ -121,52 +183,131 @@ class ClipboardFrame(wx.Frame):
 
     def delete_selected(self, event):
 
-        selection = self.listbox.GetSelection()
+        record = self.get_selected_record()
 
-        if selection != wx.NOT_FOUND:
+        if record:
 
-            text = self.listbox.GetString(selection)
+            delete_item(record["content"])
 
-            delete_item(text)
+            speak("Deleted")
 
-            self.history.remove(text)
-
-            self.listbox.Set(self.history)
+            self.load_clipboard_history()
 
     def add_favorite(self, event):
 
-        selection = self.listbox.GetSelection()
+        record = self.get_selected_record()
 
-        if selection != wx.NOT_FOUND:
+        if record:
 
-            text = self.listbox.GetString(selection)
+            set_favorite(record["content"], True)
 
-            mark_favorite(text)
+            speak("Added to favorites")
 
-            wx.MessageBox(
-                "Added to favorites",
-                "Favorite"
-            )
+            self.load_clipboard_history()
+
+            wx.MessageBox("Added to favorites", "Favorite")
+
+    def remove_favorite(self, event):
+
+        record = self.get_selected_record()
+
+        if record:
+
+            set_favorite(record["content"], False)
+
+            speak("Removed from favorites")
+
+            self.load_clipboard_history()
+
+            wx.MessageBox("Removed from favorites", "Favorite")
+
+    def toggle_view(self, event):
+
+        self.showing_favorites = not self.showing_favorites
+
+        self.show_favorites_button.SetLabel(
+            "Show All" if self.showing_favorites
+            else "Show Favorites"
+        )
+
+        speak(
+            "Showing favorites" if self.showing_favorites
+            else "Showing all clips"
+        )
+
+        self.search.SetValue("")
+
+        self.load_clipboard_history()
 
     def export_data(self, event):
 
-        filename = export_history(self.history)
+        # Always export the COMPLETE history from the database,
+        # regardless of the current search filter or favourites view.
+        # load_history() returns newest first, so reverse it to get the
+        # order the items were actually copied (first copied = first line).
+        contents = [r["content"] for r in load_history()]
+        contents.reverse()
+
+        filename = export_history(contents)
+
+        # Also put the WHOLE history on the clipboard as one block so it
+        # can be pasted (e.g. into Notepad) in a single paste: one item
+        # per line, in copy order, with no blank lines in between.
+        combined = "\n".join(contents)
+
+        # Stop the monitor from re-saving this big block as a new clip.
+        if self.monitor:
+            self.monitor.last_text = combined
+
+        pyperclip.copy(combined)
+
+        speak("Exported and copied")
 
         wx.MessageBox(
-            f"Exported to {filename}",
+            f"Exported {len(contents)} items to {filename}\n"
+            "The whole history is also copied to the clipboard - "
+            "paste it anywhere.",
             "Export Success"
         )
+
+    def clear_data(self, event):
+
+        # Ask before wiping everything - this cannot be undone.
+        answer = wx.MessageBox(
+            "Clear the entire clipboard history?\n"
+            "This cannot be undone.",
+            "Clear History",
+            wx.YES_NO | wx.ICON_WARNING
+        )
+
+        if answer != wx.YES:
+            return
+
+        clear_history()
+
+        speak("History cleared")
+
+        # Reset the view back to full history and refresh.
+        self.showing_favorites = False
+        self.show_favorites_button.SetLabel("Show Favorites")
+        self.search.SetValue("")
+        self.load_clipboard_history()
 
     def on_search(self, event):
 
         keyword = self.search.GetValue().lower()
 
-        filtered = [
-            item for item in self.history
-            if keyword in item.lower()
+        if self.showing_favorites:
+            source = load_favorites()
+        else:
+            source = load_history()
+
+        self.records = [
+            record for record in source
+            if keyword in record["content"].lower()
         ]
 
-        self.listbox.Set(filtered)
+        self.refresh_listbox()
 
     def show_window(self):
 

@@ -44,9 +44,10 @@ class ClipboardMonitor:
 
                     save_clipboard(text, category)
 
-                    self.callback(text)
+                    self.callback(text, category)
 
                 time.sleep(MONITOR_INTERVAL)
 
-            except:
-                pass
+            except Exception as error:
+                print(f"Clipboard monitor error: {error}")
+                time.sleep(MONITOR_INTERVAL)

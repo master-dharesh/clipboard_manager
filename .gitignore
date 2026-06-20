@@ -1,0 +1,5 @@
+venv/
+__pycache__/
+*.pyc
+clipboard_history.db
+clipboard_export_*.txt
